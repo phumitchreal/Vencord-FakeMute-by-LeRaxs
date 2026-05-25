@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Vencord, a Discord client mod
  * Copyright (c) 2026 LeRaxs
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -18,6 +18,21 @@ const settings = definePluginSettings({
         description: "Re-insert the button if Discord rerenders the voice controls",
         type: OptionType.BOOLEAN,
         default: true
+    },
+    useAlt: {
+        description: "Require Alt for the keyboard shortcut",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    useCtrl: {
+        description: "Require Ctrl for the keyboard shortcut",
+        type: OptionType.BOOLEAN,
+        default: false
+    },
+    keyCode: {
+        description: "Keyboard key for the shortcut (KeyC, KeyX, etc.)",
+        type: OptionType.STRING,
+        default: "KeyC"
     }
 });
 
@@ -97,11 +112,10 @@ function updateDOMButton() {
 function createDOMButton() {
     const button = document.createElement("button");
     button.className = "fake-mute-button-LeRaxs";
-    const label = fixated ? "ปิด Fake Mute/Deafen" : "เปิด Fake Mute/Deafen";
-    button.setAttribute("aria-label", label);
-    button.title = label;
+    button.setAttribute("aria-label", fixated ? "ปิด Fake Mute/Deafen" : "เปิด Fake Mute/Deafen");
+    button.title = fixated ? "ปิด Fake Mute/Deafen" : "เปิด Fake Mute/Deafen";
     button.innerHTML = getSVGIcon();
-    button.addEventListener("click", event => {
+    button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         toggleFixate();
@@ -110,7 +124,7 @@ function createDOMButton() {
 }
 
 function findButtonContainer() {
-    return document.querySelector('[class*="voiceButtonsContainer"]');
+    return document.querySelector("[class*='voiceButtonsContainer']");
 }
 
 function tryDOMMethod() {
@@ -152,9 +166,7 @@ function getVoiceChannelId(): string | null {
     try {
         const voiceChannelId = SelectedChannelStore.getVoiceChannelId();
         if (voiceChannelId) return voiceChannelId;
-    } catch {
-        // ignored
-    }
+    } catch {}
 
     try {
         const currentUser = UserStore.getCurrentUser();
@@ -230,6 +242,37 @@ function unpatchWebSocket() {
     }
 }
 
+function onKeyDown(e: KeyboardEvent) {
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+    if (e.metaKey) return;
+    if (e.target instanceof HTMLElement) {
+        const tag = e.target.tagName;
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || e.target.isContentEditable) return;
+    }
+
+    const needAlt = settings.store.useAlt;
+    const needCtrl = settings.store.useCtrl;
+    const targetKey = settings.store.keyCode ?? 'KeyC';
+
+    const altOk = needAlt ? e.altKey : !e.altKey;
+    const ctrlOk = needCtrl ? e.ctrlKey : !e.ctrlKey;
+    const keyOk = e.code === targetKey;
+
+    if (altOk && ctrlOk && keyOk) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleFixate();
+    }
+}
+
+function registerKeyboardShortcut() {
+    document.addEventListener('keydown', onKeyDown, true);
+}
+
+function unregisterKeyboardShortcut() {
+    document.removeEventListener('keydown', onKeyDown, true);
+}
+
 const audioDeviceContextPatch = (children: Array<any>) => {
     if (!Array.isArray(children)) return;
     children.push(
@@ -237,14 +280,14 @@ const audioDeviceContextPatch = (children: Array<any>) => {
         React.createElement(Menu.MenuItem, {
             key: "vc-fake-mute-item",
             id: "vc-fake-mute-item",
-            label: "Fake Mute/Deafen โดย LeRaxs",
+            label: `Fake Mute/Deafen โดย LeRaxs (${settings.store.useAlt ? 'Alt+' : ''}${settings.store.useCtrl ? 'Ctrl+' : ''}${(settings.store.keyCode ?? 'KeyC').replace('Key', '')})`,
             action: () => toggleFixate()
         })
     );
 };
 
 export default definePlugin({
-    name: "FakeMuteByLeRaxs",
+    name: "แอบฟังอยู่นะจ้ะ",
     description: "Fake Mute/Deafen โดยกรอง packet self_mute/self_deaf",
     tags: ["Voice", "Utility"],
     authors: [{ name: "LeRaxs", id: 0n }],
@@ -259,8 +302,10 @@ export default definePlugin({
             tryDOMMethod();
         }
         setupDOMObserver();
+        registerKeyboardShortcut();
     },
     stop() {
+        unregisterKeyboardShortcut();
         unpatchWebSocket();
 
         if (domButton && domButton.parentElement) {

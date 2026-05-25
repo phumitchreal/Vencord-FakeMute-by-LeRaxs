@@ -33,6 +33,11 @@ const settings = definePluginSettings({
         description: "Keyboard key for the shortcut (KeyC, KeyX, etc.)",
         type: OptionType.STRING,
         default: "KeyC"
+    },
+    autoUpdate: {
+        description: "Check for plugin updates automatically once per day",
+        type: OptionType.BOOLEAN,
+        default: true
     }
 });
 
@@ -42,6 +47,10 @@ let domButton: HTMLButtonElement | null = null;
 let observer: MutationObserver | null = null;
 let retryCount = 0;
 const maxRetries = 10;
+const UPDATE_URL = "https://raw.githubusercontent.com/leraxs001/BetterDiscord-FakeMute-by-LeRaxs/main/FakeMutebyLeRaxs.plugin.js";
+const CURRENT_VERSION = "1.2.0";
+const UPDATE_CHECK_KEY = "fakeMuteByLeRaxsLastUpdateCheck";
+const UPDATE_CHECK_INTERVAL_MS = 1000 * 60 * 60 * 24; // 24 hours
 
 function injectCSS() {
     if (document.getElementById(STYLE_ID)) return;
@@ -242,6 +251,67 @@ function unpatchWebSocket() {
     }
 }
 
+function getLastUpdateCheck(): number {
+    const raw = window.localStorage.getItem(UPDATE_CHECK_KEY);
+    const value = raw ? Number(raw) : 0;
+    return Number.isFinite(value) ? value : 0;
+}
+
+function setLastUpdateCheck(value: number) {
+    window.localStorage.setItem(UPDATE_CHECK_KEY, String(value));
+}
+
+function needsUpdateCheck(): boolean {
+    return Date.now() - getLastUpdateCheck() > UPDATE_CHECK_INTERVAL_MS;
+}
+
+function parseRemoteVersion(source: string): string | null {
+    const match = source.match(/@version\s+([0-9]+(?:\.[0-9]+)*)/i);
+    return match?.[1] ?? null;
+}
+
+function compareVersions(a: string, b: string): number {
+    const aParts = a.split('.').map((part) => parseInt(part, 10));
+    const bParts = b.split('.').map((part) => parseInt(part, 10));
+    const length = Math.max(aParts.length, bParts.length);
+
+    for (let i = 0; i < length; i++) {
+        const aValue = aParts[i] ?? 0;
+        const bValue = bParts[i] ?? 0;
+        if (aValue > bValue) return 1;
+        if (aValue < bValue) return -1;
+    }
+    return 0;
+}
+
+async function checkForUpdates(force = false) {
+    if (!force && !settings.store.autoUpdate) return;
+    if (!force && !needsUpdateCheck()) return;
+
+    try {
+        const response = await fetch(UPDATE_URL, { cache: 'no-store' });
+        if (!response.ok) return;
+
+        const source = await response.text();
+        setLastUpdateCheck(Date.now());
+
+        const remoteVersion = parseRemoteVersion(source);
+        if (!remoteVersion) return;
+
+        if (compareVersions(remoteVersion, CURRENT_VERSION) > 0) {
+            showPluginToast(`พบเวอร์ชันใหม่ ${remoteVersion} แล้ว! ดูที่ console`, 'success');
+            console.info(`[แอบฟังอยู่นะจ้ะ] มีเวอร์ชันใหม่ ${remoteVersion} ที่ ${UPDATE_URL}`);
+        } else if (force) {
+            showPluginToast('ตอนนี้เป็นเวอร์ชันล่าสุดแล้ว', 'message');
+        }
+    } catch (error) {
+        if (force) {
+            showPluginToast('เช็คอัปเดตไม่สำเร็จ', 'failure');
+        }
+        console.warn('FakeMuteByLeRaxs update check failed:', error);
+    }
+}
+
 function onKeyDown(e: KeyboardEvent) {
     if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
     if (e.metaKey) return;
@@ -303,6 +373,7 @@ export default definePlugin({
         }
         setupDOMObserver();
         registerKeyboardShortcut();
+        void checkForUpdates();
     },
     stop() {
         unregisterKeyboardShortcut();
